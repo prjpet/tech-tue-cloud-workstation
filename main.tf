@@ -14,6 +14,10 @@ variable "aws_pem" {
   description = "The PEM file to use for SSH. This is outputted with the IP for convenience"
 }
 
+variable "ssh_key" {
+  description = "The AWS Key Pair to use for SSH"
+}
+
 provider "aws" {
   region                  = var.aws_region
   shared_credentials_file = var.aws_creds_file
@@ -48,7 +52,7 @@ resource "aws_vpc" "work-vpc" {
   enable_dns_hostnames = "true" #gives you an internal host name
   enable_classiclink   = "false"
   instance_tenancy     = "default"
-
+  
   tags = {
     Name = "work-vpc"
   }
@@ -69,4 +73,63 @@ resource "aws_internet_gateway" "work-igw" {
   tags = {
     Name = "work-igw"
   }
+}
+
+resource "aws_security_group" "work-sg" {
+  name   = "work-sg"
+  vpc_id = aws_vpc.work-vpc.id
+}
+
+resource "aws_security_group_rule" "sg-ssh" {
+  type              = "ingress"
+  from_port         = 22
+  to_port           = 22
+  protocol          = "tcp"
+  cidr_blocks       = ["${chomp(data.http.myip.body)}/32"]
+  security_group_id = aws_security_group.work-sg.id
+}
+
+resource "aws_security_group_rule" "sg-rdp" {
+  type              = "ingress"
+  from_port         = 3389
+  to_port           = 3389
+  protocol          = "tcp"
+  cidr_blocks       = ["${chomp(data.http.myip.body)}/32"]
+  security_group_id = aws_security_group.work-sg.id
+}
+
+resource "aws_security_group_rule" "allow_all" {
+  type              = "egress"
+  from_port         = 0
+  to_port           = 0
+  protocol          = "-1"
+  cidr_blocks       = ["0.0.0.0/0"]
+  security_group_id = aws_security_group.work-sg.id
+} 
+resource "aws_instance" "workstation1" {
+  ami                    = data.aws_ami.ubuntu.id
+  instance_type          = "t3a.xlarge"
+  key_name               = var.ssh_key
+  vpc_security_group_ids = [aws_security_group.work-sg.id]
+  subnet_id              = aws_subnet.work-subnet.id
+  user_data              = file("workstation1.sh")
+  tags = {
+    Name = "workstation1"
+  }
+}
+
+output "ssh_connection_string" {
+  value = "ssh -i ${var.aws_pem} ubuntu@${aws_instance.workstation1.public_ip}"
+}
+
+output "RDP_address" {
+  value = aws_instance.workstation1.public_ip
+}
+
+output "RDP_UserName" {
+  value = "student"
+}
+
+output "RDP_Password" {
+  value = "ChangeMe"
 }
